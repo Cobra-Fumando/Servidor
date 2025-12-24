@@ -1,0 +1,3 @@
+﻿  Origem.c
+C:\Users\Thiago\source\repos\Aprender\Aprender\Origem.c(68,38): warning C4267: 'função': conversão de 'size_t' para 'int', possível perda de dados
+  Aprender.vcxproj -> C:\Users\Thiago\source\repos\Aprender\x64\Debug\Aprender.exe
