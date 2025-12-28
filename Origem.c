@@ -4,8 +4,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#define MaxClients 5
 
 #pragma comment(lib, "ws2_32.lib")
+
+CRITICAL_SECTION cs;
 
 typedef struct {
 	int id;
@@ -21,11 +24,76 @@ typedef struct {
 	SOCKET* sock;
 } servidor;
 
-WSADATA wsaData;
-SOCKET sock;
+typedef struct {
+	int id;
+	SOCKET* sock;
+} Cliente;
+
+typedef void (*TaskFunc)(void*);
+
+typedef struct {
+	TaskFunc func;
+	void* param;
+} Task;
 
 
-DWORD WINAPI Receber(LPVOID lpParam) {
+HANDLE semTarefas;
+Task Fila[MaxClients];
+int inicio = 0;
+int Fim = 0;
+int count = 0;
+
+void Enfileirar(TaskFunc func, void* param) {
+	EnterCriticalSection(&cs);
+
+	if (count == MaxClients) {
+		printf("Fila cheia\n");
+		LeaveCriticalSection(&cs);
+		return;
+	}
+
+	Fila[Fim].func = func;
+	Fila[Fim].param = param;
+	
+	Fim = (Fim + 1) % MaxClients;
+	count++;
+	
+	LeaveCriticalSection(&cs);
+	ReleaseSemaphore(semTarefas, 1, NULL);
+}
+
+Task Desenfileirar() {
+	Task task;
+
+	if (count == 0) {
+		printf("Fila vazia\n");
+		task.func = NULL;
+		task.param = NULL;
+		return task;
+	}
+
+	task = Fila[inicio];
+	inicio = (inicio + 1) % MaxClients;
+	count--;
+
+	return task;
+}
+
+DWORD WINAPI ExecutarTarefas(LPVOID lpParam) {
+	while (1) {
+		WaitForSingleObject(semTarefas, INFINITE);
+
+		EnterCriticalSection(&cs);
+		Task task = Desenfileirar();
+		LeaveCriticalSection(&cs);
+
+		if (task.func != NULL) {
+			task.func(task.param);
+		}
+	}
+}
+
+void ReceberTarefas(LPVOID lpParam) {
 	servidor* clientSockPtr = (servidor*)lpParam;
 	char buffer[1024];
 	int bytesReceived;
@@ -40,7 +108,9 @@ DWORD WINAPI Receber(LPVOID lpParam) {
 		}
 		else {
 			printf("cliente desconectou\n");
-			*clientSockPtr->executado = 1;
+			free(clientSockPtr->executado);
+			free(clientSockPtr->sock);
+			free(clientSockPtr);
 			break;
 		}
 	}
@@ -48,6 +118,9 @@ DWORD WINAPI Receber(LPVOID lpParam) {
 	closesocket(*clientSockPtr->sock);
 	return 0;
 }
+
+WSADATA wsaData;
+SOCKET sock;
 
 DWORD WINAPI Enviar(LPVOID lpParam) {
 	servidor* clientSockPtr = (servidor*)lpParam;
@@ -60,13 +133,6 @@ DWORD WINAPI Enviar(LPVOID lpParam) {
 		fgets(buffer, sizeof(buffer), stdin);
 		buffer[strcspn(buffer, "\n")] = '\0';
 
-		if (*clientSockPtr->executado == 1) {
-			free(clientSockPtr->executado);
-			free(clientSockPtr->sock);
-			free(clientSockPtr);
-			break;
-		}
-
 		send(*clientSockPtr->sock, buffer, strlen(buffer), 0);
 	}
 
@@ -76,6 +142,7 @@ DWORD WINAPI Enviar(LPVOID lpParam) {
 
 int Iniciar() {
 	int iResult;
+	int TotalClient = 0;
 
 	struct sockaddr_in serverAddr;
 
@@ -107,16 +174,26 @@ int Iniciar() {
 
 	listen(sock, 5);
 
-	printf("Servidor iniciado e aguardando conexoes...\n");
-
+	printf("Servidor iniciado\n");
 
 	HANDLE hthread;
 	HANDLE hthread1;
 
+	Cliente clients[5];
+	hthread = CreateThread(NULL, 0, ExecutarTarefas, NULL, 0, NULL);
+
 	while (1) {
-		printf("Aguardando novas conexões\n");
+
+		printf("Aguardando novas conexões...\n");
 		SOCKET* clientSock = (SOCKET*)malloc(sizeof(SOCKET));
 		*clientSock = accept(sock, NULL, NULL);
+
+		if (TotalClient >= 5) {
+			printf("Numero maximo de clientes atingido. Conexao recusada.\n");
+			closesocket(*clientSock);
+			free(clientSock);
+			continue;
+		}
 
 		if (*clientSock != INVALID_SOCKET) {
 			printf("Cliente conectado com sucesso\n");
@@ -126,13 +203,21 @@ int Iniciar() {
 			*serve->executado = 0;
 			serve->sock = clientSock;
 
-			hthread = CreateThread(NULL, 0, Receber, serve, 0, NULL);
-			hthread1 = CreateThread(NULL, 0, Enviar, serve, 0, NULL);
+			clients[TotalClient].sock = clientSock;
+			clients[TotalClient].id = TotalClient + 1;
+			TotalClient++;
 
+			Enfileirar(ReceberTarefas, serve);
+			hthread1 = CreateThread(NULL, 0, Enviar, serve, 0, NULL);
 
 			if (hthread == NULL || hthread1 == NULL) {
 				return 1;
 			}
+		}
+		else {
+			printf("Erro ao aceitar conexao do cliente\n");
+			closesocket(*clientSock);
+			free(clientSock);
 		}
 
 
@@ -149,23 +234,15 @@ int Iniciar() {
 }
 
 int main() {
+	InitializeCriticalSection(&cs);
+
+	semTarefas = CreateSemaphore(NULL, 0, MaxClients, NULL);
 
 	int result = Iniciar();
 
 	if (result == 1) {
 		return 1;
 	}
-
-	Cadastro cadastro;
-	cadastro.id = 1;
-	cadastro.idade = 23;
-	cadastro.salario = 2500.50;
-
-	strncpy(cadastro.name, "Joao Silva", sizeof(cadastro.name));
-	cadastro.name[strcspn(cadastro.name, "\n")] = '\0';
-
-	strncpy(cadastro.cpf, "49323512", sizeof(cadastro.cpf));
-	cadastro.cpf[strcspn(cadastro.cpf, "\n")] = '\0';
 
 	return 0;
 }

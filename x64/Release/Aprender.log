@@ -1,0 +1,8 @@
+﻿  Origem.c
+C:\Users\Thiago\source\repos\Aprender\Aprender\Origem.c(119,2): warning C4098: 'ReceberTarefas': função 'void' retornando um valor
+C:\Users\Thiago\source\repos\Aprender\Aprender\Origem.c(136,38): warning C4267: 'função': conversão de 'size_t' para 'int', possível perda de dados
+  Gerando código
+  Previous IPDB not found, fall back to full compilation.
+  All 10 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Finalizada a geração de código
+  Aprender.vcxproj -> C:\Users\Thiago\source\repos\Aprender\x64\Release\Aprender.exe
